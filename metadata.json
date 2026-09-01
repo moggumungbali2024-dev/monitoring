@@ -1,0 +1,6 @@
+{
+  "name": "Hikvision Resto TV Hub",
+  "description": "Sistem Pemantauan CCTV HIK Vision Multi-Cabang & Dashboard Omset Restoran Terpadu untuk Tampilan TV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
