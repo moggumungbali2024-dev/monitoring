@@ -13,7 +13,6 @@ RUN npm ci
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src/ ./src/
 COPY server.ts ./
-COPY assets/ ./assets/
 
 # Build production frontend (dist/index.html, dist/assets) and server (dist/server.cjs)
 RUN npm run build
@@ -30,9 +29,8 @@ ENV PORT=3000
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy compiled bundles from builder stage
+# Copy compiled bundles from builder stage (contains frontend dist and server.cjs)
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/assets ./assets
 
 # Expose web server port
 EXPOSE 3000
