@@ -1165,8 +1165,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Express server running on http://localhost:${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`Express server running on port ${PORT}`);
   });
 }
 

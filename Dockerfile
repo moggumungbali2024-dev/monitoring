@@ -22,6 +22,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
+# Install curl for reliable Coolify healthchecks
+RUN apk add --no-cache curl
+
 ENV NODE_ENV=production
 ENV PORT=3000
 
