@@ -1,0 +1,16 @@
+services:
+  monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moggumung-monitoring
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    # Jika menggunakan Gemini API Key, Anda dapat membuat file .env
+    # dan menghapus tanda komentar di bawah ini:
+    # env_file:
+    #   - .env
