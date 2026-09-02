@@ -10,9 +10,14 @@ import http from "http";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
+
+// Healthcheck endpoint for Coolify / Docker
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
 
 // Lazy-loaded Gemini AI client to prevent crash if key is missing on startup
 let aiClient: GoogleGenAI | null = null;

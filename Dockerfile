@@ -35,9 +35,5 @@ COPY --from=builder /app/dist ./dist
 # Expose web server port
 EXPOSE 3000
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3000/ || exit 1
-
 # Start the application
 CMD ["node", "dist/server.cjs"]
