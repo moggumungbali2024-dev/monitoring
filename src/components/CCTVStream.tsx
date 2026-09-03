@@ -73,11 +73,19 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
   const hlsInstanceRef = useRef<any>(null);
   const flvPlayerRef = useRef<any>(null);
 
-  // Poll fresh thumbnail snapshots for HikConnect Teams cameras every 4 seconds to ensure live real-time feel
+  const isVideoActiveRef = useRef(isVideoActive);
+  useEffect(() => {
+    isVideoActiveRef.current = isVideoActive;
+  }, [isVideoActive]);
+
+  // Poll fresh thumbnail snapshots for HikConnect Teams cameras only when video stream is offline
   useEffect(() => {
     if (camera.type !== 'HikConnect Teams' || !isPlaying) return;
 
     const fetchFreshThumb = async () => {
+      // If live video is already streaming smoothly, skip thumbnail polling to prevent network congestion
+      if (isVideoActiveRef.current) return;
+
       try {
         const token = localStorage.getItem('hik_access_token');
         const serverAddress = localStorage.getItem('hik_server_address');
@@ -115,7 +123,7 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
       }
     };
 
-    const interval = setInterval(fetchFreshThumb, 4000);
+    const interval = setInterval(fetchFreshThumb, 6000);
     return () => clearInterval(interval);
   }, [camera.type, camera.hikCameraId, isPlaying]);
 
@@ -239,8 +247,12 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
 
     console.log('[CCTVStream] rawStreamUrl:', rawStreamUrl);
 
-    const isFlv = rawStreamUrl.includes('.flv') || rawStreamUrl.includes('openlive');
-    const isHls = rawStreamUrl.includes('.m3u8') || rawStreamUrl.includes('mpegurl');
+    const isExplicitHls = rawStreamUrl.includes('.m3u8') || rawStreamUrl.includes('mpegurl') || rawStreamUrl.includes('/hls');
+    const isExplicitMp4 = rawStreamUrl.endsWith('.mp4') || rawStreamUrl.includes('stream-placeholder');
+    // For Hikvision / HikCentral Connect / VTMS streams:
+    // If not HLS and not static MP4, treat live stream as FLV (compatible with mpegts.js)
+    const isFlv = !isExplicitHls && !isExplicitMp4;
+    const isHls = isExplicitHls;
 
     console.log('[CCTVStream] isFlv:', isFlv, 'isHls:', isHls);
 
@@ -261,16 +273,25 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
             cors: true,
             withCredentials: false,
           }, {
-            enableWorker: true,
-            enableStashBuffer: false,
+            enableWorker: false,
+            enableStashBuffer: true,
+            stashInitialSize: 256,
             liveBufferLatencyChasing: true,
             liveBufferLatencyMaxLatency: 3.0,
             liveBufferLatencyMinRemain: 0.5,
             lazyLoad: false,
             autoCleanupSourceBuffer: true,
+            autoCleanupMaxBackwardDuration: 10,
+            autoCleanupMinBackwardDuration: 5,
           });
 
           flvPlayerRef.current = player;
+
+          player.on(mpegts.Events.MEDIA_INFO, (info: any) => {
+            console.log('[CCTVStream] mpegts MEDIA_INFO:', info);
+            setStreamError(false);
+            setIsVideoActive(true);
+          });
 
           player.on(mpegts.Events.ERROR, (errType: any, errDetail: any) => {
             console.error('[CCTVStream] mpegts ERROR:', errType, errDetail);
@@ -282,14 +303,16 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
               return;
             }
 
-            setFetchError(`Stream offline: ${errDetail?.msg || errType || 'Format stream tidak didukung'}`);
-            setStreamError(true);
-            setIsVideoActive(false);
-            destroyPlayers();
+            if (!video.currentTime || video.paused) {
+              setFetchError(`Stream offline: ${errDetail?.msg || errType || 'Format stream tidak didukung'}`);
+              setStreamError(true);
+              setIsVideoActive(false);
+              destroyPlayers();
+            }
           });
 
           player.on(mpegts.Events.STATISTICS_INFO, (info: any) => {
-            if (info.speed > 0) {
+            if (info.speed > 0 || info.currentJitter > 0) {
               setStreamError(false);
               setIsVideoActive(true);
             }
@@ -532,7 +555,16 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
           setIsVideoActive(true);
           setStreamError(false);
         }}
-        onPause={() => setIsVideoActive(false)}
+        onTimeUpdate={(e) => {
+          const v = e.currentTarget;
+          if (v.currentTime > 0 && !v.paused) {
+            setIsVideoActive(true);
+            setStreamError(false);
+          }
+        }}
+        onPause={() => {
+          // Do not abruptly hide on temporary network buffering
+        }}
         onEnded={() => setIsVideoActive(false)}
         className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-500 ${
           isPlaying && isVideoActive && !hasStreamError ? 'opacity-100' : 'opacity-0 pointer-events-none'

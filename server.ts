@@ -503,7 +503,7 @@ app.post("/api/hik/thumbnail", async (req, res) => {
           },
           body: JSON.stringify({
             cameraID: cameraId,
-            refresh: 1,
+            refresh: req.body.refresh !== undefined ? Number(req.body.refresh) : 0,
           }),
           signal: AbortSignal.timeout(6000),
         });
@@ -586,8 +586,8 @@ app.get("/api/hik/proxy-stream", (req, res) => {
       return;
     }
 
-    const isM3u8Request = parsedUrl.pathname.includes(".m3u8");
-    const isFlvRequest = parsedUrl.pathname.includes(".flv");
+    const isM3u8Request = parsedUrl.pathname.includes(".m3u8") || currentUrl.includes(".m3u8");
+    const isFlvRequest = parsedUrl.pathname.includes(".flv") || currentUrl.includes("vtms") || currentUrl.includes("openlive") || currentUrl.includes("flv");
 
     const requestOptions = {
       hostname: parsedUrl.hostname,
@@ -602,6 +602,7 @@ app.get("/api/hik/proxy-stream", (req, res) => {
         "Connection": "keep-alive",
         "Referer": "https://www.hik-connect.com/",
         "Origin": "https://www.hik-connect.com",
+        ...(token ? { "Token": token, "Authorization": `Bearer ${token}` } : {})
       },
       rejectUnauthorized: false, // Allow self-signed certs from CDN endpoints
       checkServerIdentity: () => undefined,
@@ -632,12 +633,18 @@ app.get("/api/hik/proxy-stream", (req, res) => {
 
       if (!res.headersSent) {
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Authorization");
+        res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Authorization, Token");
         res.setHeader("Connection", "keep-alive");
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("X-Accel-Buffering", "no"); // Disable proxy buffering for ultra-low latency live stream
       }
 
-      const contentType = proxyRes.headers["content-type"] || (isFlvRequest ? "video/x-flv" : "application/octet-stream");
+      const upstreamType = proxyRes.headers["content-type"] || "";
+      const contentType = isM3u8Request || upstreamType.includes("mpegurl") 
+        ? "application/vnd.apple.mpegurl" 
+        : (isFlvRequest || upstreamType.includes("flv") ? "video/x-flv" : (upstreamType || "application/octet-stream"));
 
       if (isM3u8Request || contentType.includes("mpegurl")) {
         // Buffer the m3u8, rewrite segment URLs, then send
