@@ -72,6 +72,7 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsInstanceRef = useRef<any>(null);
   const flvPlayerRef = useRef<any>(null);
+  const ezPlayerRef = useRef<any>(null);
 
   const isVideoActiveRef = useRef(isVideoActive);
   useEffect(() => {
@@ -176,14 +177,18 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
             const authToken = localStorage.getItem('hik_access_token') || '';
             const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
-            const proxiedUrl = `${origin}/api/hik/proxy-stream?url=${encodeURIComponent(streamUrl)}&token=${encodeURIComponent(authToken)}`;
+            const proxiedUrl = streamUrl.startsWith('ezopen://')
+              ? streamUrl
+              : `${origin}/api/hik/proxy-stream?url=${encodeURIComponent(streamUrl)}&token=${encodeURIComponent(authToken)}`;
             
             setLiveStreamUrl(proxiedUrl);
 
             if (hlsUrl && hlsUrl !== streamUrl) {
-              setFallbackStreamUrl(`${origin}/api/hik/proxy-stream?url=${encodeURIComponent(hlsUrl)}&token=${encodeURIComponent(authToken)}`);
+              const proxiedHls = hlsUrl.startsWith('ezopen://') ? hlsUrl : `${origin}/api/hik/proxy-stream?url=${encodeURIComponent(hlsUrl)}&token=${encodeURIComponent(authToken)}`;
+              setFallbackStreamUrl(proxiedHls);
             } else if (flvUrl && flvUrl !== streamUrl) {
-              setFallbackStreamUrl(`${origin}/api/hik/proxy-stream?url=${encodeURIComponent(flvUrl)}&token=${encodeURIComponent(authToken)}`);
+              const proxiedFlv = flvUrl.startsWith('ezopen://') ? flvUrl : `${origin}/api/hik/proxy-stream?url=${encodeURIComponent(flvUrl)}&token=${encodeURIComponent(authToken)}`;
+              setFallbackStreamUrl(proxiedFlv);
             }
 
             setFetchError(null);
@@ -223,6 +228,10 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
         try { flvPlayerRef.current.destroy(); } catch(e) {}
         flvPlayerRef.current = null;
       }
+      if (ezPlayerRef.current) {
+        try { ezPlayerRef.current.stop(); } catch(e) {}
+        ezPlayerRef.current = null;
+      }
     };
 
     if (!video || !activeStreamUrl || !isPlaying) {
@@ -247,19 +256,41 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
 
     console.log('[CCTVStream] rawStreamUrl:', rawStreamUrl);
 
+    const isEzOpen = rawStreamUrl.startsWith('ezopen://');
     const isExplicitHls = rawStreamUrl.includes('.m3u8') || rawStreamUrl.includes('mpegurl') || rawStreamUrl.includes('/hls');
     const isExplicitMp4 = rawStreamUrl.endsWith('.mp4') || rawStreamUrl.includes('stream-placeholder');
     // For Hikvision / HikCentral Connect / VTMS streams:
-    // If not HLS and not static MP4, treat live stream as FLV (compatible with mpegts.js)
-    const isFlv = !isExplicitHls && !isExplicitMp4;
-    const isHls = isExplicitHls;
+    // If not ezopen, not HLS and not static MP4, treat live stream as FLV (compatible with mpegts.js)
+    const isFlv = !isEzOpen && !isExplicitHls && !isExplicitMp4;
+    const isHls = !isEzOpen && isExplicitHls;
 
-    console.log('[CCTVStream] isFlv:', isFlv, 'isHls:', isHls);
+    console.log('[CCTVStream] isEzOpen:', isEzOpen, 'isFlv:', isFlv, 'isHls:', isHls);
 
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const playbackUrl = activeStreamUrl.startsWith('/') ? `${origin}${activeStreamUrl}` : activeStreamUrl;
 
-    if (isFlv) {
+    if (isEzOpen) {
+      const containerId = `ezuikit-container-${camera.id}`;
+      const token = localStorage.getItem('hik_access_token') || '';
+      import('ezuikit-js').then(({ default: EZUIKit }) => {
+        try {
+          const ezPlayer = new (EZUIKit as any).EZUIKitPlayer({
+            id: containerId,
+            accessToken: token,
+            url: rawStreamUrl,
+            width: '100%',
+            height: '100%',
+          });
+          ezPlayerRef.current = ezPlayer;
+          setIsVideoActive(true);
+          setStreamError(false);
+        } catch (err: any) {
+          console.error('[CCTVStream] EZUIKit player error:', err);
+        }
+      }).catch(err => {
+        console.error('[CCTVStream] Failed to dynamically load EZUIKit:', err);
+      });
+    } else if (isFlv) {
       // Use mpegts.js for FLV live streams
       try {
         const features = mpegts.getFeatureList();
@@ -567,8 +598,16 @@ export default function CCTVStream({ camera, branchName, isFocused = false }: CC
         }}
         onEnded={() => setIsVideoActive(false)}
         className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-500 ${
-          isPlaying && isVideoActive && !hasStreamError ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          isPlaying && isVideoActive && !hasStreamError && !activeStreamUrl?.startsWith('ezopen://') ? 'opacity-100' : 'opacity-0 pointer-events-none'
         } filter contrast-110 brightness-95`}
+      />
+
+      {/* EZUIKit Player container for ezopen:// proprietary streams */}
+      <div 
+        id={`ezuikit-container-${camera.id}`} 
+        className={`absolute inset-0 w-full h-full z-10 ${
+          isPlaying && isVideoActive && (activeStreamUrl?.startsWith('ezopen://') || false) ? 'block' : 'hidden'
+        }`} 
       />
 
       {/* Camera Live/Offline State Renderer */}
